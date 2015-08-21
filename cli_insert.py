@@ -4,7 +4,7 @@ from elasticsearch import Elasticsearch
 import gzip
 from dateutil.parser import parse
 from dateutil.relativedelta import relativedelta
-
+from datetime import datetime
 from elasticsearch.helpers import bulk
 
 class GzipAwareFileType(argparse.FileType):
@@ -56,12 +56,14 @@ class Inserter(object):
         if converter is None:
             converter = rads_converter(date)
         reader = (converter(_.strip()) for _ in reader)
+        total_inserts = 0
         while True:
-            inserts = bulk(self.es, [{'_index': 'rads', '_type': 'profile', '_source': _} for _ in split_reader(reader, 100)])
+            inserts = bulk(self.es, [{'_index': 'rads', '_type': 'profile', '_source': _} for _ in split_reader(reader, 1000)])
             number_inserts = inserts[0]
             if number_inserts == 0:
                 break
-            print 'inserted', number_inserts
+            total_inserts += number_inserts
+            print datetime.now(), 'inserted', number_inserts, total_inserts
 
 
 def main():
