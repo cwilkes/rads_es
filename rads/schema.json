@@ -1,0 +1,18 @@
+{
+    "profile": {
+        "properties": {
+            "tags": {
+                "type": "nested",
+                "include_in_parent": true,
+                "properties": {
+                    "ns": { "type": "short" },
+                    "site": { "type": "short" },
+                    "cat": { "type": "integer" },
+                    "frequency": { "type": "short" },
+                    "date": { "type": "date" }
+                }
+            },
+            "uid": { "type": "long" }
+        }
+    }
+}

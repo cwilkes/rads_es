@@ -2,7 +2,10 @@ import sys
 import argparse
 from elasticsearch import Elasticsearch
 import gzip
+from dateutil.parser import parse
+from dateutil.relativedelta import relativedelta
 
+from elasticsearch.helpers import bulk
 
 class GzipAwareFileType(argparse.FileType):
     """Used to read in both text and .gz files"""
@@ -13,21 +16,25 @@ class GzipAwareFileType(argparse.FileType):
             return super(GzipAwareFileType, self).__call__(string)
 
 
-def rads_converter():
+def rads_converter(date):
     """
     :return:function that converts from a rads line of uid (tab) ns,site,cat,freq,rec (space) ns,site... (space) endvalue
     into a json object to put into ES
     """
+    recency_map = dict()
+    for recency in range(40):
+        recency_map[recency] = (date+relativedelta(days=-recency)).strftime('%Y-%m-%d')
+
     def convert(line):
         p = line.split()
         attributes = list()
         for e in (_.split(',') for _ in p[1:-1]):
-            attributes.append(dict(ns=int(e[0]), site=int(e[1]), cat=int(e[2]), frequency=int(e[3]), recency=int(e[4])))
-        return dict(_id=int(p[0]), attributes=attributes)
+            attributes.append(dict(ns=int(e[0]), site=int(e[1]), cat=int(e[2]), frequency=int(e[3]), date=recency_map[int(e[4])]))
+        return dict(uid=long(p[0]), tags=attributes)
     return convert
 
 
-def split_reader(reader, chunk_size=5000):
+def split_reader(reader, chunk_size=1000):
     i = 0
     while i < chunk_size:
         try:
@@ -44,15 +51,14 @@ class Inserter(object):
         else:
             self.es = Elasticsearch(host)
 
-    def add_elements(self, reader, converter=None):
+    def add_elements(self, reader, date, converter=None):
         print 'working on', reader
         if converter is None:
-            converter = rads_converter()
+            converter = rads_converter(date)
         reader = (converter(_.strip()) for _ in reader)
-        reader = (dict(index=_) for _ in reader)
         while True:
-            inserts = self.es.bulk(split_reader(reader, 1000), index='rads', doc_type='user')
-            number_inserts = len(inserts['items'])
+            inserts = bulk(self.es, [{'_index': 'rads', '_type': 'profile', '_source': _} for _ in split_reader(reader, 100)])
+            number_inserts = inserts[0]
             if number_inserts == 0:
                 break
             print 'inserted', number_inserts
@@ -61,12 +67,13 @@ class Inserter(object):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('host', type=str, help='elasticsearch host')
+    parser.add_argument('date', type=str, help='date of file')
     parser.add_argument('files', type=GzipAwareFileType('r'), nargs='+')
     args = parser.parse_args()
 
     inserter = Inserter(args.host)
     for fn in args.files:
-        inserter.add_elements(fn)
+        inserter.add_elements(fn, parse(args.date) + relativedelta(days=-2))
 
 
 if __name__ == '__main__':
